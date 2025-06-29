@@ -1,5 +1,5 @@
 -- tests/ini_parser_spec.lua
-local IniParser = require("src.ini_parser")
+local IniParser = require("ini_parser")
 
 describe("IniParser", function()
     describe("parse", function()

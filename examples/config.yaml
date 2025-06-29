@@ -1,0 +1,31 @@
+# 全局配置
+app_name: 示例应用
+version: 1.0.0
+
+# 数据库配置
+database:
+  host: localhost
+  port: 3306
+  username: root
+  password: secret123
+  database: myapp
+
+# 日志配置
+logging:
+  level: info
+  file: app.log
+  max_size: 10MB
+  backup_count: 5
+
+# 服务器配置
+server:
+  host: 0.0.0.0
+  port: 8080
+  workers: 4
+  timeout: 30
+
+# Redis配置
+redis:
+  host: 127.0.0.1
+  port: 6379
+  db: 0

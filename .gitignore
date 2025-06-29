@@ -1,0 +1,50 @@
+# Lua 编译文件
+*.luac
+
+# 依赖管理
+/rocks/
+/.luarocks/
+/lua_modules/
+
+# 构建输出
+/build/
+/dist/
+
+# 日志文件
+*.log
+/logs/
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~
+
+# 本地配置文件
+config.local.lua
+*.local.lua
+.env
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 编辑器/IDE 生成的文件和目录
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+*.code-workspace
+
+# 测试覆盖率报告
+/luacov.report.out
+/luacov.stats.out
+/coverage/
+
+# 其他
+/temp/
+/tmp/

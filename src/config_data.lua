@@ -1,10 +1,12 @@
 -- config_data.lua
 local ConfigData = {}
+local ErrorHandler = require("error_handler")
 
-function ConfigData.new(data)
+function ConfigData.new(data, format)
     local instance = {
         data = data or {},
-        modified = false
+        modified = false,
+        format = format or "ini" -- 默认格式为 INI
     }
     
     setmetatable(instance, {__index = ConfigData})
@@ -87,6 +89,67 @@ function ConfigData:set_global(key, value)
     end
     
     return self:set("__GLOBAL__", key, value)
+end
+
+-- 获取当前配置格式
+function ConfigData:get_format()
+    return self.format
+end
+
+-- 获取所有节名
+function ConfigData:get_sections()
+    local sections = {}
+    for section, _ in pairs(self.data) do
+        table.insert(sections, section)
+    end
+    return sections
+end
+
+-- 获取指定节的所有键
+function ConfigData:get_keys(section)
+    if type(self.data) ~= "table" then
+        return {}
+    end
+    if not self.data[section] then
+        return {}
+    end
+    if type(self.data[section]) ~= "table" then
+        return {}
+    end
+    local keys = {}
+    for key, _ in pairs(self.data[section]) do
+        table.insert(keys, key)
+    end
+    return keys
+end
+
+-- 转换配置到其他格式
+function ConfigData:convert_to(new_format)
+    if not new_format then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.INVALID_CONFIG_DATA,
+            "未提供目标格式"
+        )
+    end
+    
+    -- 检查格式是否支持
+    local supported_formats = {ini = true, json = true, yaml = true}
+    if not supported_formats[new_format:lower()] then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+            "不支持的配置格式: " .. new_format
+        )
+    end
+    
+    -- 如果格式相同，无需转换
+    if new_format:lower() == self.format:lower() then
+        return true
+    end
+    
+    self.format = new_format:lower()
+    self.modified = true
+    
+    return true
 end
 
 return ConfigData

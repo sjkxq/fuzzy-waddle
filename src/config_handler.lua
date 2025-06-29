@@ -1,130 +1,275 @@
--- config_handler.lua
-local FileUtils = require("src.file_utils")
-local IniParser = require("src.ini_parser")
-local ConfigData = require("src.config_data")
+local FileUtils = require("file_utils")
+local ConfigData = require("config_data")
+local IniParser = require("ini_parser")
+local ErrorHandler = require("error_handler")
 
-local ConfigHandler = {}
+-- 尝试加载 JSON 和 YAML 解析器
+local JsonParser, YamlParser
+local has_json, json_err = pcall(function() JsonParser = require("json_parser") end)
+local has_yaml, yaml_err = pcall(function() YamlParser = require("yaml_parser") end)
 
--- 特殊节名，用于存储全局配置
-local GLOBAL_SECTION = "_global"
+local ConfigHandler = {
+    _instances = {}
+}
 
-function ConfigHandler.load(file_path)
-    local content, err = FileUtils.read_file(file_path)
-    if err then
-        return nil, err
+-- 根据文件扩展名确定配置格式
+local function get_format_from_path(file_path)
+    if type(file_path) ~= "string" then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.INVALID_ARGUMENT,
+            "文件路径必须是字符串"
+        )
     end
     
-    local config_table, parse_err = IniParser.parse(content)
-    if parse_err then
-        return nil, parse_err
+    local ext = file_path:match("%.([^%.]+)$")
+    if not ext then
+        return "ini" -- 没有扩展名，默认为 INI
     end
     
-    -- 处理全局配置项（顶层键值对）
-    local processed_config = {}
-    processed_config[GLOBAL_SECTION] = {}
+    ext = ext:lower()
     
-    for key, value in pairs(config_table) do
-        if type(value) == "table" then
-            -- 这是一个节
-            processed_config[key] = value
-        else
-            -- 这是一个全局配置项
-            processed_config[GLOBAL_SECTION][key] = value
+    if ext == "json" then
+        return "json"
+    elseif ext == "yml" or ext == "yaml" then
+        return "yaml"
+    else
+        return "ini" -- 默认为 INI
+    end
+end
+
+-- 创建一个新的配置处理器实例
+function ConfigHandler.create(file_path, format)
+    -- 参数验证
+    if not file_path then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_NOT_FOUND,
+            "未提供文件路径"
+        )
+    end
+
+    -- 获取文件格式
+    local file_format, format_err
+    if format then
+        file_format = format:lower()
+    else
+        file_format, format_err = get_format_from_path(file_path)
+        if format_err then
+            return nil, format_err
         end
     end
-    
-    local config_data = ConfigData.new(processed_config)
-    
+
+    -- 检查格式支持
+    if file_format == "json" and not has_json then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+            "json"
+        )
+    elseif (file_format == "yaml" or file_format == "yml") and not has_yaml then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+            "yaml"
+        )
+    end
+
     local instance = {
         file_path = file_path,
-        config_data = config_data
+        format = file_format,
+        config = ConfigData.new({}, file_format)
     }
     
-    setmetatable(instance, {__index = ConfigHandler})
-    return instance, nil
-end
-
-function ConfigHandler.create(file_path)
-    local config_data = ConfigData.new({})
-    
-    local instance = {
-        file_path = file_path,
-        config_data = config_data
-    }
-    
-    setmetatable(instance, {__index = ConfigHandler})
-    return instance, nil
-end
-
-function ConfigHandler:save()
-    if not self.config_data:is_modified() then
-        return true, nil  -- 没有修改，无需保存
-    end
-    
-    local config_data = self.config_data:get_all()
-    local output_config = {}
-    
-    -- 处理全局配置项（特殊节中的键值对）
-    local global_section = config_data[GLOBAL_SECTION]
-    if global_section then
-        for key, value in pairs(global_section) do
-            output_config[key] = value
+    -- 添加实例方法
+    instance.load = function(self)
+        local config, err = ConfigHandler.load(self.file_path, self.format)
+        if not config then
+            return false, err
         end
+        self.config = config
+        return true
     end
     
-    -- 复制其他节
-    for section, values in pairs(config_data) do
-        if section ~= GLOBAL_SECTION then
-            output_config[section] = values
+    instance.save = function(self)
+        if not self.config:is_modified() then
+            return true -- 没有修改，不需要保存
         end
+        return ConfigHandler.save(self.config, self.file_path)
     end
     
-    local content, stringify_err = IniParser.stringify(output_config)
-    if stringify_err then
-        return false, stringify_err
+    instance.get = function(self, section, key)
+        return self.config:get(section, key)
     end
     
-    local success, write_err = FileUtils.write_file(self.file_path, content)
-    if write_err then
-        return false, write_err
+    instance.set = function(self, section, key, value)
+        return self.config:set(section, key, value)
     end
     
-    self.config_data:reset_modified()
-    return true, nil
+    instance.delete = function(self, section, key)
+        return self.config:delete(section, key)
+    end
+    
+    instance.get_all = function(self)
+        return self.config:get_all()
+    end
+    
+    instance.get_global = function(self, key)
+        return self.config:get_global(key)
+    end
+    
+    instance.set_global = function(self, key, value)
+        return self.config:set_global(key, value)
+    end
+
+    instance.is_modified = function(self)
+        return self.config:is_modified()
+    end
+
+    instance.reset_modified = function(self)
+        return self.config:reset_modified()
+    end
+
+    instance.get_format = function(self)
+        return self.format
+    end
+    
+    -- 存储实例
+    table.insert(ConfigHandler._instances, instance)
+    
+    return instance
 end
 
-function ConfigHandler:get(section, key)
-    return self.config_data:get(section, key)
+-- 加载配置文件
+function ConfigHandler.load(file_path, format)
+    -- 参数验证
+    if not file_path then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_NOT_FOUND,
+            "未提供文件路径"
+        )
+    end
+    
+    -- 检查文件是否存在
+    local exists, err = FileUtils.file_exists(file_path)
+    if not exists then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_NOT_FOUND,
+            file_path
+        )
+    end
+    
+    -- 读取文件内容
+    local content, read_err = FileUtils.read_file(file_path)
+    if not content then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_READ_ERROR,
+            read_err.message or "未知错误"
+        )
+    end
+    
+    -- 获取文件格式
+    local file_format = format or get_format_from_path(file_path)
+    local data, parse_err
+    
+    -- 根据格式解析内容
+    if file_format == "json" then
+        if not has_json then
+            return nil, ErrorHandler.new_error(
+                ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+                "json"
+            )
+        end
+        data, parse_err = JsonParser.parse(content)
+    elseif file_format == "yaml" or file_format == "yml" then
+        if not has_yaml then
+            return nil, ErrorHandler.new_error(
+                ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+                "yaml"
+            )
+        end
+        data, parse_err = YamlParser.parse(content)
+    else -- ini
+        data, parse_err = IniParser.parse(content)
+    end
+    
+    if not data then
+        return nil, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.PARSE_ERROR,
+            parse_err.message or "未知错误"
+        )
+    end
+    
+    -- 创建配置数据对象
+    local config = ConfigData.new(data, file_format)
+    config:reset_modified()
+    
+    return config
 end
 
-function ConfigHandler:set(section, key, value)
-    return self.config_data:set(section, key, value)
-end
-
--- 获取全局配置项
-function ConfigHandler:get_global(key)
-    return self.config_data:get(GLOBAL_SECTION, key)
-end
-
--- 设置全局配置项
-function ConfigHandler:set_global(key, value)
-    return self.config_data:set(GLOBAL_SECTION, key, value)
-end
-
-function ConfigHandler:delete(section, key)
-    return self.config_data:delete(section, key)
-end
-
-function ConfigHandler:get_all()
-    return self.config_data:get_all()
-end
-
-function ConfigHandler:is_modified()
-    return self.config_data:is_modified()
-end
-
-function ConfigHandler:reset_modified()
-    return self.config_data:reset_modified()
+-- 保存配置到文件
+function ConfigHandler.save(config, file_path)
+    -- 参数验证
+    if not config then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.INVALID_CONFIG_DATA,
+            "未提供配置数据"
+        )
+    end
+    
+    if not file_path then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_NOT_FOUND,
+            "未提供文件路径"
+        )
+    end
+    
+    -- 获取配置格式
+    local format = config:get_format()
+    if not format then
+        -- 根据文件扩展名确定格式
+        format = get_format_from_path(file_path)
+    end
+    
+    local content, serialize_err
+    
+    -- 根据格式序列化内容
+    if format == "json" then
+        if not has_json then
+            return false, ErrorHandler.new_error(
+                ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+                "json"
+            )
+        end
+        content, serialize_err = JsonParser.serialize(config.data)
+    elseif format == "yaml" or format == "yml" then
+        if not has_yaml then
+            return false, ErrorHandler.new_error(
+                ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT,
+                "yaml"
+            )
+        end
+        content, serialize_err = YamlParser.serialize(config.data)
+    else -- ini
+        content, serialize_err = IniParser.serialize(config.data)
+    end
+    
+    if not content then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.SERIALIZE_ERROR,
+            serialize_err.message or "未知错误"
+        )
+    end
+    
+    -- 写入文件
+    local success, write_err = FileUtils.write_file(file_path, content)
+    if not success then
+        return false, ErrorHandler.new_error(
+            ErrorHandler.ERROR_CODES.FILE_WRITE_ERROR,
+            write_err.message or "未知错误"
+        )
+    end
+    
+    -- 重置修改标志
+    config:reset_modified()
+    
+    return true
 end
 
 return ConfigHandler

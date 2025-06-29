@@ -1,5 +1,5 @@
 -- tests/config_data_spec.lua
-local ConfigData = require("src.config_data")
+local ConfigData = require("config_data")
 
 describe("ConfigData", function()
     local config_data

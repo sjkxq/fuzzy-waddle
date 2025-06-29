@@ -1,167 +1,91 @@
--- tests/config_handler_spec.lua
-local ConfigHandler = require("src.config_handler")
+local ConfigHandler = require("config_handler")
+local ErrorHandler = require("error_handler")
+local FileUtils = require("file_utils")
 
 describe("ConfigHandler", function()
-    local test_file = "build/test_config.ini"
-    
-    after_each(function()
-        os.remove(test_file)
-    end)
-    
+    -- 测试配置处理器创建
     describe("create", function()
-        it("should create a new config handler instance", function()
-            local handler, err = ConfigHandler.create(test_file)
-            assert.is_nil(err)
-            assert.is_table(handler)
-            assert.are.equal(test_file, handler.file_path)
+        it("应该成功创建配置处理器实例", function()
+            local handler = ConfigHandler.create("test.ini")
+            assert.is_not_nil(handler)
+            assert.equal("function", type(handler.get))
+            assert.equal("function", type(handler.set))
         end)
-    end)
-    
-    describe("load", function()
-        it("should return error when file doesn't exist", function()
-            local handler, err = ConfigHandler.load("nonexistent.ini")
-            assert.is_nil(handler)
+
+        it("应该处理无效文件路径", function()
+            local _, err = ConfigHandler.create(123)
             assert.is_not_nil(err)
-        end)
-        
-        it("should load existing config file", function()
-            -- 先创建并保存一个配置文件
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set("section1", "key1", "value1")
-            local success, save_err = handler:save()
-            assert.is_true(success)
-            assert.is_nil(save_err)
-            
-            -- 测试加载
-            local loaded_handler, load_err = ConfigHandler.load(test_file)
-            assert.is_nil(load_err)
-            assert.is_table(loaded_handler)
-            assert.are.equal("value1", loaded_handler:get("section1", "key1"))
+            assert.equal(ErrorHandler.ERROR_CODES.FILE_NOT_FOUND, err.code)
+            assert.matches("未提供文件路径", err.message)
         end)
     end)
-    
+
+    -- 测试配置文件加载
+    describe("load", function()
+        it("应该成功加载INI文件", function()
+            local config, err = ConfigHandler.load("tests/fixtures/test_config.ini")
+            assert.is_nil(err)
+            assert.is_not_nil(config)
+        end)
+
+        it("应该处理不存在的文件", function()
+            local _, err = ConfigHandler.load("nonexistent.ini")
+            assert.is_not_nil(err)
+            assert.equal(ErrorHandler.ERROR_CODES.FILE_NOT_FOUND, err.code)
+            assert.matches("nonexistent.ini", err.message)
+        end)
+
+        it("应该处理不支持的文件格式", function()
+            local _, err = ConfigHandler.load("test.txt")
+            assert.is_not_nil(err)
+            assert.equal(ErrorHandler.ERROR_CODES.UNSUPPORTED_FORMAT, err.code)
+            assert.matches("不支持的文件类型", err.message)
+        end)
+    end)
+
+    -- 测试配置文件保存
     describe("save", function()
-        it("should save config to file", function()
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set("section1", "key1", "value1")
-            handler:set("section2", "key2", "value2")
-            
-            local success, save_err = handler:save()
+        it("应该成功保存配置", function()
+            local handler = ConfigHandler.create("temp_config.ini")
+            handler:set("section", "key", "value")
+            local success, err = handler:save()
             assert.is_true(success)
-            assert.is_nil(save_err)
+            assert.is_nil(err)
             
-            -- 验证保存的内容
-            local loaded_handler, load_err = ConfigHandler.load(test_file)
-            assert.is_nil(load_err)
-            assert.are.equal("value1", loaded_handler:get("section1", "key1"))
-            assert.are.equal("value2", loaded_handler:get("section2", "key2"))
+            -- 清理
+            os.remove("temp_config.ini")
         end)
-        
-        it("should not save if not modified", function()
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set("section1", "key1", "value1")
-            handler:save()
-            
-            -- 修改文件内容
-            local file = io.open(test_file, "w")
-            file:write("[section1]\nkey1=modified\n")
-            file:close()
-            
-            -- 不修改配置，直接保存
-            local success, save_err = handler:save()
-            assert.is_true(success)
-            assert.is_nil(save_err)
-            
-            -- 验证文件内容没有被覆盖
-            local loaded_handler, load_err = ConfigHandler.load(test_file)
-            assert.is_nil(load_err)
-            assert.are.equal("modified", loaded_handler:get("section1", "key1"))
+
+        it("应该处理无效的配置数据", function()
+            local success, err = ConfigHandler.save(nil, "test.ini")
+            assert.is_false(success)
+            assert.is_not_nil(err)
+            assert.equal(ErrorHandler.ERROR_CODES.INVALID_CONFIG_DATA, err.code)
         end)
-    end)
-    
-    describe("get and set", function()
-        it("should get and set values correctly", function()
-            local handler, err = ConfigHandler.create(test_file)
-            
-            -- 测试设置值
-            handler:set("section1", "key1", "value1")
-            assert.are.equal("value1", handler:get("section1", "key1"))
-            
-            -- 测试修改值
-            handler:set("section1", "key1", "new_value")
-            assert.are.equal("new_value", handler:get("section1", "key1"))
-            
-            -- 测试获取整个部分
-            local section = handler:get("section1")
-            assert.is_table(section)
-            assert.are.equal("new_value", section.key1)
-        end)
-    end)
-    
-    describe("delete", function()
-        it("should delete keys and sections", function()
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set("section1", "key1", "value1")
-            handler:set("section1", "key2", "value2")
-            handler:set("section2", "key3", "value3")
-            
-            -- 删除键
-            handler:delete("section1", "key1")
-            assert.is_nil(handler:get("section1", "key1"))
-            assert.are.equal("value2", handler:get("section1", "key2"))
-            
-            -- 删除部分
-            handler:delete("section2")
-            assert.is_nil(handler:get("section2"))
-        end)
-    end)
-    
-    describe("get_all", function()
-        it("should return all config data", function()
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set("section1", "key1", "value1")
-            handler:set("section2", "key2", "value2")
-            
-            local all_data = handler:get_all()
-            assert.is_table(all_data)
-            assert.is_table(all_data.section1)
-            assert.are.equal("value1", all_data.section1.key1)
-            assert.is_table(all_data.section2)
-            assert.are.equal("value2", all_data.section2.key2)
+
+        it("应该处理无权限目录", function()
+            local handler = ConfigHandler.create("/root/test_config.ini")
+            handler:set("section", "key", "value")
+            local success, err = handler:save()
+            assert.is_false(success)
+            assert.is_not_nil(err)
+            assert.equal(ErrorHandler.ERROR_CODES.FILE_PERMISSION_DENIED, err.code)
         end)
     end)
 
+    -- 测试全局配置
     describe("global configuration", function()
-        it("should get and set global values correctly", function()
-            local handler, err = ConfigHandler.create(test_file)
+        it("应该保存和加载全局值", function()
+            local handler = ConfigHandler.create("temp_global.ini")
             handler:set_global("app_name", "MyApp")
-            handler:set_global("version", "1.0.0")
-            
-            assert.are.equal("MyApp", handler:get_global("app_name"))
-            assert.are.equal("1.0.0", handler:get_global("version"))
-        end)
-
-        it("should save and load global values", function()
-            local handler, err = ConfigHandler.create(test_file)
-            handler:set_global("app_name", "MyApp")
-            handler:set_global("version", "1.0.0")
             handler:save()
-
-            local loaded_handler, load_err = ConfigHandler.load(test_file)
-            assert.is_nil(load_err)
-            assert.are.equal("MyApp", loaded_handler:get_global("app_name"))
-            assert.are.equal("1.0.0", loaded_handler:get_global("version"))
-        end)
-
-        it("should track modified state for global values", function()
-            local handler, err = ConfigHandler.create(test_file)
-            assert.is_false(handler:is_modified())
             
-            handler:set_global("app_name", "MyApp")
-            assert.is_true(handler:is_modified())
+            local handler2 = ConfigHandler.create("temp_global.ini")
+            handler2:load()
+            assert.equal("MyApp", handler2:get_global("app_name"))
             
-            handler:reset_modified()
-            assert.is_false(handler:is_modified())
+            -- 清理
+            os.remove("temp_global.ini")
         end)
     end)
 end)

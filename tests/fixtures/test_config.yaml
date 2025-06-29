@@ -1,0 +1,11 @@
+_global:
+  app_name: TestApp
+  version: 1.0.0
+
+section1:
+  key1: value1
+  key2: value2
+
+section2:
+  key3: value3
+  key4: value4
